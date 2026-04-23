@@ -11,42 +11,68 @@
       <h2>Fill the form fields below</h2>
 
       <div class="form-fields">
-        <div v-for="field in formFields" :key="field.name" class="field-row">
-          <label :for="field.name">{{ field.name }}</label>
+        <template v-for="item in displayFields" :key="item.key">
+          <!-- Checkbox group -->
+          <div v-if="item.type === 'checkbox-group'" class="field-row checkbox-group-row">
+            <label>{{ item.title }}</label>
+            <div class="checkbox-group">
+              <label v-for="(cb, idx) in item.checkboxes" :key="cb.name" class="checkbox-label">
+                <input type="checkbox" v-model="cb.value" />
+                {{ cb.label || ('Checkbox ' + (idx + 1)) }}
+              </label>
+            </div>
+          </div>
 
-          <input
-            v-if="field.type === 'text'"
-            :id="field.name"
-            type="text"
-            v-model="field.value"
-          />
-
-          <select
-            v-if="field.type === 'dropdown'"
-            :id="field.name"
-            v-model="field.value"
-          >
-            <option v-for="opt in field.options" :key="opt" :value="opt">
-              {{ opt }}
-            </option>
-          </select>
-
-          <label v-if="field.type === 'checkbox'" class="checkbox-label">
-            <input type="checkbox" v-model="field.value" />
-          </label>
-
-          <div v-if="field.type === 'radio'" class="radio-group">
-            <label v-for="opt in field.options" :key="opt">
-              <input
-                type="radio"
-                :name="field.name"
-                :value="opt"
-                v-model="field.value"
-              />
-              {{ opt }}
+          <!-- Single checkbox -->
+          <div v-else-if="item.type === 'checkbox'" class="field-row">
+            <label :for="item.name">{{ item.name }}</label>
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="item.value" />
+              {{ item.label || item.name }}
             </label>
           </div>
-        </div>
+
+          <!-- Other fields -->
+          <div v-else class="field-row">
+            <label :for="item.name">{{ item.name }}</label>
+
+            <input
+              v-if="item.type === 'text'"
+              :id="item.name"
+              type="text"
+              v-model="item.value"
+            />
+
+            <textarea
+              v-if="item.type === 'textarea'"
+              :id="item.name"
+              v-model="item.value"
+              rows="4"
+            ></textarea>
+
+            <select
+              v-if="item.type === 'dropdown'"
+              :id="item.name"
+              v-model="item.value"
+            >
+              <option v-for="opt in item.options" :key="opt" :value="opt">
+                {{ opt }}
+              </option>
+            </select>
+
+            <div v-if="item.type === 'radio'" class="radio-group">
+              <label v-for="opt in item.options" :key="opt">
+                <input
+                  type="radio"
+                  :name="item.name"
+                  :value="opt"
+                  v-model="item.value"
+                />
+                {{ opt }}
+              </label>
+            </div>
+          </div>
+        </template>
       </div>
 
       <div v-if="formFields.length === 0" class="no-fields">
@@ -95,6 +121,49 @@ export default {
       messageType: 'success',
     };
   },
+  computed: {
+    displayFields() {
+      const result = [];
+      let i = 0;
+      const fields = this.formFields;
+      while (i < fields.length) {
+        if (fields[i].type === 'checkbox') {
+          // Collect consecutive checkboxes
+          const group = [];
+          const startIdx = i;
+          while (i < fields.length && fields[i].type === 'checkbox') {
+            group.push(fields[i]);
+            i++;
+          }
+          if (group.length > 1) {
+            // Find common prefix for group title
+            const names = group.map(f => f.name);
+            let commonPrefix = names[0];
+            for (let n = 1; n < names.length; n++) {
+              while (!names[n].startsWith(commonPrefix)) {
+                commonPrefix = commonPrefix.slice(0, -1);
+              }
+            }
+            // Clean up prefix (remove trailing dots, spaces, numbers)
+            let title = commonPrefix.replace(/[\s._-]+$/, '');
+            if (!title) title = group[0].name;
+            result.push({
+              key: 'cbgroup-' + startIdx,
+              type: 'checkbox-group',
+              title,
+              checkboxes: group,
+            });
+          } else {
+            result.push({ ...group[0], key: group[0].name });
+          }
+        } else {
+          result.push({ ...fields[i], key: fields[i].name });
+          i++;
+        }
+      }
+      return result;
+    },
+  },
   methods: {
     async onFileSelected(event) {
       const file = event.target.files[0];
@@ -129,10 +198,17 @@ export default {
           const name = field.getName();
 
           if (field instanceof PDFTextField) {
-            return { name, type: 'text', value: field.getText() || '' };
+            const isMultiline = field.isMultiline();
+            return { name, type: isMultiline ? 'textarea' : 'text', value: field.getText() || '' };
           }
           if (field instanceof PDFCheckBox) {
-            return { name, type: 'checkbox', value: field.isChecked() };
+            const widgets = field.acroField.getWidgets();
+            let label = name;
+            if (widgets.length > 0) {
+              const onValue = widgets[0].getOnValue()?.decodeText?.() || widgets[0].getOnValue()?.toString?.() || '';
+              if (onValue && onValue !== 'Yes') label = onValue;
+            }
+            return { name, type: 'checkbox', value: field.isChecked(), label };
           }
           if (field instanceof PDFDropdown) {
             return {
@@ -188,7 +264,7 @@ export default {
 
         for (const field of this.formFields) {
           try {
-            if (field.type === 'text') {
+            if (field.type === 'text' || field.type === 'textarea') {
               const f = form.getTextField(field.name);
               f.setText(field.value);
             } else if (field.type === 'checkbox') {
@@ -315,16 +391,35 @@ button.secondary:hover {
 }
 
 .field-row input[type='text'],
+.field-row textarea,
 .field-row select {
   flex: 1;
   padding: 8px;
   border: 1px solid #ccc;
   border-radius: 4px;
   font-size: 14px;
+  box-sizing: border-box;
+  min-width: 0;
+  width: 0;
+}
+
+.field-row textarea {
+  font-family: Arial, sans-serif;
+  resize: vertical;
 }
 
 .checkbox-label {
   min-width: auto !important;
+}
+
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.checkbox-group-row {
+  align-items: flex-start;
 }
 
 .radio-group label {
