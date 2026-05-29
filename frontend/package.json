@@ -12,7 +12,7 @@
     "vue": "^3.4.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.0.379",
-    "axios": "^1.6.0"
+    "axios": "^1.16.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",
